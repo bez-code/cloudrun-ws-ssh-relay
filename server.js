@@ -8,14 +8,38 @@ const UPSTREAM_PORT = parseInt(process.env.UPSTREAM_PORT || "22", 10);
 const AUTH_TOKEN = process.env.AUTH_TOKEN || "";
 const WS_PATH = process.env.WS_PATH || "/r-change-me";
 
+console.log("BOOT relay build=healthz-v2", {
+  port: PORT,
+  upstreamHostSet: Boolean(UPSTREAM_HOST),
+  upstreamPort: UPSTREAM_PORT,
+  wsPath: WS_PATH,
+  authTokenSet: Boolean(AUTH_TOKEN)
+});
+
 if (!UPSTREAM_HOST) {
   throw new Error("UPSTREAM_HOST is required");
 }
 
 const server = http.createServer((req, res) => {
-  if (req.url === "/healthz") {
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+  const path = url.pathname;
+
+  if (path === "/" || path === "/healthz") {
     res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
     res.end("ok\n");
+    return;
+  }
+
+  if (path === "/__debug") {
+    res.writeHead(200, { "content-type": "application/json; charset=utf-8" });
+    res.end(JSON.stringify({
+      ok: true,
+      build: "healthz-v2",
+      upstreamHostSet: Boolean(UPSTREAM_HOST),
+      upstreamPort: UPSTREAM_PORT,
+      wsPath: WS_PATH,
+      authTokenSet: Boolean(AUTH_TOKEN)
+    }, null, 2));
     return;
   }
 
@@ -30,7 +54,7 @@ const wss = new WebSocketServer({
 });
 
 server.on("upgrade", (req, socket, head) => {
-  const url = new URL(req.url, "http://relay.local");
+  const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
 
   if (url.pathname !== WS_PATH) {
     socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
@@ -67,7 +91,6 @@ wss.on("connection", (ws) => {
     try { upstream.destroy(); } catch {}
   };
 
-  // Cloud Run max request timeout is 60 minutes; close before platform timeout.
   const sessionTtl = setTimeout(closeBoth, 55 * 60 * 1000);
 
   upstream.on("data", (chunk) => {
